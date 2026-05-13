@@ -7,9 +7,13 @@ from __future__ import annotations
 import os
 from dotenv import load_dotenv
 from langchain_anthropic import ChatAnthropic
-from langgraph.prebuilt import create_react_agent
+from langgraph.prebuilt import create_agent
 
 from homelab_agent.tools.system_tools import SYSTEM_TOOLS
+from homelab_agent.tools.docker_tools import DOCKER_TOOLS
+
+ALL_TOOLS = SYSTEM_TOOLS + DOCKER_TOOLS
+
 
 load_dotenv()
 
@@ -33,9 +37,9 @@ def build_agent():
         model="claude-sonnet-4-5-20250929",
         temperature=0,
     )
-    return create_react_agent(
+    return create_agent(
         model=model,
-        tools=SYSTEM_TOOLS,
+        tools=ALL_TOOLS,
         prompt=SYSTEM_PROMPT,
     )
 
@@ -80,6 +84,10 @@ if __name__ == "__main__":
         "How is dibo doing right now? Give me a one-paragraph health summary.",
         "Is the disk getting full anywhere?",
         "What's using the most memory on dibo, and is that concerning?",
+        "Are all my containers healthy?",
+        "What's the most resource-hungry container right now?",
+        "Has anything restarted recently?",
+        "Show me the last 20 lines of the Plex container logs.",
     ]
     for q in questions:
         run_query(q)
