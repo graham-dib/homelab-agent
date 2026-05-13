@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     dibo_ssh_user: str
     dibo_ssh_key_path: str = "~/.ssh/id_ed25519"
     dibo_ssh_port: int = 22
+    adguard_url: str = "http://dibo:3000"
+    adguard_user: str
+    adguard_password: str
 
 
 settings = Settings()

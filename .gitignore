@@ -4,3 +4,5 @@ __pycache__/
 .pytest_cache/
 langchain_tutorial/
 langgraph_tutorial/
+NOTES.md
+metrics.duckdb*
