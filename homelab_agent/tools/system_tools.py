@@ -74,7 +74,7 @@ def get_disk_usage() -> list[dict]:
     """
     # -B1G forces output in GB; --output gives stable columns
     raw = run_on_dibo(
-        "df -B1G --output=source,size,used,avail,pcent,target "
+        "df -BK --output=source,size,used,avail,pcent,target "
         "-x tmpfs -x devtmpfs -x overlay -x squashfs"
     )
     lines = raw.split("\n")[1:]  # skip header
