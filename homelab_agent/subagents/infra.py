@@ -21,6 +21,7 @@ from homelab_agent.tools.docker_tools import (
     find_recently_restarted_containers,
 )
 from homelab_agent.tools.history_tools import HISTORY_TOOLS
+from homelab_agent.tools.storage_tools import STORAGE_TOOLS
 
 INFRA_TOOLS = [
     *SYSTEM_TOOLS,
@@ -28,6 +29,7 @@ INFRA_TOOLS = [
     get_container_stats,
     find_recently_restarted_containers,
     *HISTORY_TOOLS,
+    *STORAGE_TOOLS,
 ]
 
 INFRA_PROMPT = """You are the Infrastructure subagent for dibo, a Linux home server.

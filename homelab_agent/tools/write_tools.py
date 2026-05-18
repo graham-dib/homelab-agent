@@ -12,6 +12,7 @@ runtime, which saves the checkpoint and suspends execution.
 from __future__ import annotations
 
 import json
+import shlex
 
 import httpx
 from langchain_core.tools import tool
@@ -126,7 +127,7 @@ def kill_torrent(torrent_id: str) -> str:
         f"docker exec transmission transmission-remote localhost:9091 -t {torrent_id} --stop",
         timeout=15,
     )
-    return f"Torrent {torrent_id!r} stopped. Result: {result.stdout.strip() or 'OK'}"
+    return f"Torrent {torrent_id!r} stopped. Result: {result or 'OK'}"
 
 
 @tool
@@ -191,7 +192,52 @@ def set_download_limit(limit_kb: int) -> str:
     if decision != "approved":
         return f"[CANCELLED] set_download_limit(limit_kb={limit_kb}) was not approved by the operator."
     result = run_on_dibo(cmd, timeout=10)
-    return f"Download limit set to {display}. Result: {result.stdout.strip() or 'OK'}"
+    return f"Download limit set to {display}. Result: {result or 'OK'}"
+
+
+@tool
+def delete_files(paths: list[str]) -> str:
+    """Permanently delete one or more files on dibo.
+
+    Use after identifying cleanup candidates via find_large_files or
+    find_old_files. Present the full list clearly before calling this tool —
+    the operator must approve before anything is removed.
+    REQUIRES HUMAN APPROVAL. Deletion is irreversible.
+
+    Args:
+        paths: List of absolute file paths to delete (e.g.
+               ['/srv/storage/transmission/downloads/old.mkv'])
+    """
+    if not paths:
+        return "Error: no paths provided."
+
+    # Reject anything outside /srv to prevent accidental system damage
+    for p in paths:
+        if not p.startswith("/srv/"):
+            return f"Error: path {p!r} is outside /srv/ — refusing for safety."
+
+    # Get sizes to show in the approval prompt
+    quoted = " ".join(shlex.quote(p) for p in paths)
+    total = run_on_dibo(
+        f"du -shc {quoted} 2>/dev/null | tail -1 | awk '{{print $1}}'",
+        timeout=20,
+    ) or "unknown"
+
+    decision = interrupt({
+        "action": "delete_files",
+        "args": {"paths": paths},
+        "warning": (
+            f"Will permanently delete {len(paths)} file(s) "
+            f"({total} total). THIS CANNOT BE UNDONE.\n"
+            + "\n".join(f"  {p}" for p in paths)
+        ),
+        "reversible": False,
+    })
+    if decision != "approved":
+        return "[CANCELLED] delete_files was not approved by the operator."
+
+    result = run_on_dibo(f"rm -f {quoted}", timeout=60)
+    return f"Deleted {len(paths)} file(s), freed approximately {total}."
 
 
 WRITE_TOOLS = [
@@ -201,4 +247,5 @@ WRITE_TOOLS = [
     kill_torrent,
     enable_adguard_protection,
     set_download_limit,
+    delete_files,
 ]

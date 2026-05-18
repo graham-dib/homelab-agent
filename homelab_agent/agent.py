@@ -12,15 +12,18 @@ from homelab_agent.tools.system_tools import SYSTEM_TOOLS
 from homelab_agent.tools.docker_tools import DOCKER_TOOLS
 from homelab_agent.tools.adguard_tools import ADGUARD_TOOLS
 from homelab_agent.tools.history_tools import HISTORY_TOOLS
+from homelab_agent.tools.storage_tools import STORAGE_TOOLS
 from homelab_agent.cost_tracking import UsageTracker
 
-ALL_TOOLS = SYSTEM_TOOLS + DOCKER_TOOLS + ADGUARD_TOOLS + HISTORY_TOOLS
+ALL_TOOLS = SYSTEM_TOOLS + DOCKER_TOOLS + ADGUARD_TOOLS + HISTORY_TOOLS + STORAGE_TOOLS
 
 load_dotenv()
 
-SYSTEM_PROMPT = """You are an operator's assistant for a Linux home server called \
+_SYSTEM_PROMPT_TEMPLATE = """You are an operator's assistant for a Linux home server called \
 dibo, running Ubuntu. dibo hosts Plex Media Server, AdGuard Home (DNS filtering), \
 Transmission (torrents), and the TP-Link Omada wireless controller, all in Docker.
+
+Today's date is {today}.
 
 When the user asks a question:
 - Use the available tools to gather evidence before answering.
@@ -31,6 +34,8 @@ service status) and synthesise.
 call get_snapshot_coverage to find out how much historical data exists. If the data \
 span is too short to support the claim being asked about, say so explicitly — don't \
 overreach.
+- File modification dates returned by tools are accurate — trust them over your \
+internal sense of the current date.
 - If a tool returns surprising values, mention them explicitly.
 - If you don't have a tool for something, say so rather than guessing.
 """
@@ -38,12 +43,14 @@ overreach.
 
 def build_agent(llm=None):
     """Construct the ReAct agent. Returns a runnable graph."""
+    from datetime import date
     if llm is None:
         llm = ChatAnthropic(model="claude-sonnet-4-5-20250929", temperature=0)
+    system_prompt = _SYSTEM_PROMPT_TEMPLATE.format(today=date.today().isoformat())
     return create_agent(
         model=llm,
         tools=ALL_TOOLS,
-        system_prompt=SYSTEM_PROMPT,
+        system_prompt=system_prompt,
     )
 
 
