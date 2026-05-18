@@ -47,14 +47,12 @@ Guidance:
 """
 
 
-def build_media_agent():
+def build_media_agent(llm=None):
     """Construct the Media subagent. Returns a runnable graph."""
-    model = ChatAnthropic(
-        model="claude-sonnet-4-5-20250929",
-        temperature=0,
-    )
+    if llm is None:
+        llm = ChatAnthropic(model="claude-sonnet-4-5-20250929", temperature=0)
     return create_agent(
-        model=model,
+        model=llm,
         tools=MEDIA_TOOLS,
         system_prompt=MEDIA_PROMPT,
         name="Media Subagent",

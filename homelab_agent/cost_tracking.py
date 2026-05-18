@@ -90,18 +90,26 @@ class UsageTracker(BaseCallbackHandler):
             "latency_seconds": latency,
         }
 
-        conn = get_connection()
-        try:
-            conn.execute(
-                """INSERT INTO agent_usage
-                   (id, timestamp, question, model, n_llm_calls,
-                    input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
-                    estimated_cost_usd, latency_seconds)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                list(record.values()),
-            )
-            conn.commit()
-        finally:
-            conn.close()
+        for attempt in range(6):
+            try:
+                conn = get_connection()
+                try:
+                    conn.execute(
+                        """INSERT INTO agent_usage
+                           (id, timestamp, question, model, n_llm_calls,
+                            input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+                            estimated_cost_usd, latency_seconds)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        list(record.values()),
+                    )
+                    conn.commit()
+                finally:
+                    conn.close()
+                break
+            except Exception as e:
+                if "Conflicting lock" in str(e) and attempt < 5:
+                    time.sleep(2)
+                else:
+                    break  # give up silently — usage is still returned
 
         return record

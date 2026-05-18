@@ -36,14 +36,12 @@ overreach.
 """
 
 
-def build_agent():
+def build_agent(llm=None):
     """Construct the ReAct agent. Returns a runnable graph."""
-    model = ChatAnthropic(
-        model="claude-sonnet-4-5-20250929",
-        temperature=0,
-    )
+    if llm is None:
+        llm = ChatAnthropic(model="claude-sonnet-4-5-20250929", temperature=0)
     return create_agent(
-        model=model,
+        model=llm,
         tools=ALL_TOOLS,
         system_prompt=SYSTEM_PROMPT,
     )

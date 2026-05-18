@@ -31,15 +31,31 @@ from eval.scoring import score_result
 QUESTIONS_FILE = Path(__file__).parent / "questions.yaml"
 
 
+# ── LLM construction ──────────────────────────────────────────────────────────
+
+def _build_llm(model_name: str, ollama_host: str = "localhost:11434"):
+    """Return a LangChain chat model. Anthropic if name starts with 'claude', else Ollama."""
+    if model_name.startswith("claude"):
+        from langchain_anthropic import ChatAnthropic
+        return ChatAnthropic(model=model_name, temperature=0)
+    else:
+        from langchain_ollama import ChatOllama
+        return ChatOllama(
+            model=model_name,
+            base_url=f"http://{ollama_host}",
+            temperature=0,
+        )
+
+
 # ── Agent construction ────────────────────────────────────────────────────────
 
-def _build_agent(mode: str):
+def _build_agent(mode: str, llm):
     if mode == "single":
         from homelab_agent.agent import build_agent
-        return build_agent(), "single"
+        return build_agent(llm=llm), "single"
     else:
         from homelab_agent.multi_agent import build_supervisor
-        return build_supervisor(), "multi"
+        return build_supervisor(llm=llm), "multi"
 
 
 def _extract_answer(result: dict) -> str:
@@ -114,6 +130,20 @@ def _print_row(q_id: str, category: str, scores: dict, usage: dict, latency: flo
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run dibo-agent eval harness")
     parser.add_argument("--agent", choices=["single", "multi"], default="multi")
+    parser.add_argument(
+        "--model",
+        default="claude-sonnet-4-5-20250929",
+        metavar="MODEL",
+        help="LLM to benchmark. 'claude-*' → Anthropic API; anything else → Ollama. "
+             "Examples: claude-sonnet-4-5-20250929, qwen2.5:14b, llama3.1:latest",
+    )
+    parser.add_argument(
+        "--ollama-host",
+        default="localhost:11434",
+        metavar="HOST:PORT",
+        help="Ollama API host (default: localhost:11434). Set to a remote host when "
+             "running on a GPU-less machine (e.g. 100.90.119.31:11435 via Tailscale).",
+    )
     parser.add_argument("--filter", metavar="TAG", help="Only run questions with this tag")
     parser.add_argument("--ids", metavar="Q01,Q02", help="Comma-separated question IDs to run")
     parser.add_argument("--dry-run", action="store_true", help="Print questions without running")
@@ -148,9 +178,10 @@ def main() -> None:
         sys.exit(1)
     print(f"OK ({reach.get('hostname', 'dibo')})")
 
-    # Build agent once
-    print(f"Building agent (mode={args.agent})...", end=" ", flush=True)
-    agent, mode = _build_agent(args.agent)
+    # Build LLM and agent once
+    print(f"Building agent (mode={args.agent}, model={args.model})...", end=" ", flush=True)
+    llm = _build_llm(args.model, ollama_host=args.ollama_host)
+    agent, mode = _build_agent(args.agent, llm)
     print("OK")
 
     run_id = str(uuid4())
@@ -182,7 +213,8 @@ def main() -> None:
 
         latency = time.time() - t0
         usage = tracker.persist()
-        model = usage.get("model") or "unknown"
+        # For Ollama models the callback may not capture model name; fall back to CLI arg
+        model = usage.get("model") or args.model
 
         scores = score_result(q, answer)
         _print_row(q["id"], q["category"], scores, usage, latency)

@@ -58,19 +58,17 @@ prior knowledge alone.
 """
 
 
-def build_supervisor():
+def build_supervisor(llm=None):
     """Construct the supervisor graph with HITL checkpointing. Returns a compiled graph."""
-    model = ChatAnthropic(
-        model="claude-sonnet-4-5-20250929",
-        temperature=0,
-    )
-    infra = build_infra_agent()
-    network = build_network_agent()
-    media = build_media_agent()
+    if llm is None:
+        llm = ChatAnthropic(model="claude-sonnet-4-5-20250929", temperature=0)
+    infra = build_infra_agent(llm)
+    network = build_network_agent(llm)
+    media = build_media_agent(llm)
 
     return create_supervisor(
         agents=[infra, network, media],
-        model=model,
+        model=llm,
         tools=WRITE_TOOLS,
         prompt=SUPERVISOR_PROMPT,
         output_mode="full_history",

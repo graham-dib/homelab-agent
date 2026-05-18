@@ -19,7 +19,7 @@ from homelab_agent.ingest.schema import get_connection
 
 def _resolve_run_id(conn, prefix: str) -> str | None:
     rows = conn.execute(
-        "SELECT DISTINCT run_id FROM eval_results ORDER BY MIN(timestamp) DESC"
+        "SELECT run_id FROM eval_results GROUP BY run_id ORDER BY MIN(timestamp) DESC"
     ).fetchall()
     matches = [r[0] for r in rows if r[0].startswith(prefix)]
     return matches[0] if matches else None

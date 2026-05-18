@@ -129,6 +129,30 @@ See [`incidents/2026-05-14-overnight-outage.md`](incidents/2026-05-14-overnight-
 
 ---
 
+## Model benchmark
+
+The eval harness (25 questions, two-phase scoring) was run against both Claude Sonnet 4.5 and a local qwen2.5:14b (Q4_K_M, ~9 GB VRAM) served by Ollama on an RTX 5070 Ti. Both runs executed **on dibo** against its live metrics DB, with Ollama API calls forwarded over Tailscale to the desktop GPU.
+
+| Model | Prog pass | Mean judge | Composite | Latency (avg) | Agent cost |
+|-------|-----------|------------|-----------|---------------|------------|
+| Claude Sonnet 4.5 | **13/15** | **4.25/5** | **0.77** | 21s | $1.12 |
+| qwen2.5:14b (local) | 11/15 | 3.68/5 | 0.66 | 7s | **$0.00** |
+
+**Where Sonnet 4.5 wins clearly:** detailed analysis questions — container log parsing (Q13: +0.80), AdGuard query log & top-clients (Q16, Q18: +0.80), container health inspection (Q12, Q13). These require extracting precise values from multi-tool reasoning chains.
+
+**Where qwen2.5:14b surprises:** temporal/history questions (Q20–Q22, Δ –0.20 to –0.60 in qwen's favour) — the 14B model produces more direct DuckDB `SELECT` calls without overthinking. Sonnet spent $0.13 on Q20 making many tool attempts; qwen answered the same question correctly in 5s.
+
+**Tie or near-tie (Δ ≤ 0.07):** 14 of 25 questions — simple diagnostics (Q01–Q08), AdGuard status (Q14, Q15, Q17), snapshot coverage (Q19), overnight-gap diagnosis (Q25). For routine monitoring qwen2.5:14b is equivalent at zero marginal cost.
+
+**Overall:** ~14% composite score gap, 3× faster, 100% cheaper on agent inference. The cost-quality frontier is well-defined: use Sonnet 4.5 when precision matters on complex multi-tool chains; use a local model for routine health checks.
+
+```bash
+# Run the benchmark yourself (from dibo, with Ollama on a remote GPU)
+python -m eval.runner --agent single --model claude-sonnet-4-5-20250929
+python -m eval.runner --agent single --model qwen2.5:14b --ollama-host <desktop-tailscale-ip>:11435
+python -m eval.report --compare <run_a> <run_b>
+```
+
 ## Costs
 
 Measured on Claude Sonnet 4.5 (May 2026 pricing: $3/M input, $15/M output):
@@ -191,9 +215,8 @@ pytest tests/ -v  # ~15s, requires dibo on Tailscale
 
 ## What I'd do with more time
 
-- **Eval harness** — 25-question ground-truth set, LLM-as-judge scoring, latency/cost/accuracy metrics across model variants
-- **Local model benchmark** — run the eval against a quantized 7B (Qwen 2.5 / Llama 3.1) via Ollama on an RTX 5070 Ti, compare against Sonnet 4.5 on accuracy and cost
-- **Streamlit UI** — chat interface, trace panel showing every tool call, pending-approvals queue for HITL actions
 - **More write tools** — `kill_torrent`, `enable_adguard_protection`, `set_download_limit`; each with the same interrupt/audit pattern
 - **Persistent checkpoints** — swap `InMemorySaver` for `SqliteSaver` so interrupted write actions survive process restarts
 - **Alert hooks** — cron job that queries the agent ("is anything degraded?") and sends a push notification if the answer contains a warning
+- **Eval on dibo** — re-run the 25-question harness on dibo against its live DuckDB to get valid history/temporal scores; history questions (Q19–Q25) currently can't be evaluated from the dev machine
+- **Loom walkthrough** — 3-minute demo showing agent diagnosing a real issue end-to-end

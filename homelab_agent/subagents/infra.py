@@ -54,14 +54,12 @@ Guidance:
   Don't misidentify it.
 """
 
-def build_infra_agent():
+def build_infra_agent(llm=None):
     """Construct the Infrastructure subagent. Returns a runnable graph."""
-    model = ChatAnthropic(
-        model="claude-sonnet-4-5-20250929",
-        temperature=0,
-    )
+    if llm is None:
+        llm = ChatAnthropic(model="claude-sonnet-4-5-20250929", temperature=0)
     return create_agent(
-        model=model,
+        model=llm,
         tools=INFRA_TOOLS,
         system_prompt=INFRA_PROMPT,
         name="Infrastructure Subagent",

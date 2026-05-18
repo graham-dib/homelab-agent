@@ -44,14 +44,12 @@ Guidance:
 """
 
 
-def build_network_agent():
+def build_network_agent(llm=None):
     """Construct the Network subagent. Returns a runnable graph."""
-    model = ChatAnthropic(
-        model="claude-sonnet-4-5-20250929",
-        temperature=0,
-    )
+    if llm is None:
+        llm = ChatAnthropic(model="claude-sonnet-4-5-20250929", temperature=0)
     return create_agent(
-        model=model,
+        model=llm,
         tools=NETWORK_TOOLS,
         system_prompt=NETWORK_PROMPT,
         name="Network Subagent",

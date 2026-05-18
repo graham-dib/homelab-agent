@@ -29,7 +29,7 @@
     type: numeric_range
     values:
       - name: storage_pct
-        extract_pattern: "(?i)/srv/storage[^\\d]*(\\d+)%|(?i)(\\d+)%.*storage|storage.*(\\d+)%"
+        extract_pattern: "(?i)(?:/srv/storage[^\\d]*(\\d+)%|(\\d+)%.*storage|storage.*(\\d+)%)"
         low: 75
         high: 99
         unit: "%"
