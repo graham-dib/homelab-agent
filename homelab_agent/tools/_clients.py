@@ -60,7 +60,7 @@ def run_on_dibo(cmd: str, warn: bool = False, timeout: int = 15) -> str:
     """
     try:
         result = dibo().run(cmd, hide=True, warn=warn, timeout=timeout, in_stream=False)
-    except (OSError, EOFError):
+    except Exception:
         reset_dibo()
         result = dibo().run(cmd, hide=True, warn=warn, timeout=timeout, in_stream=False)
     return result.stdout.strip()

@@ -79,9 +79,49 @@ CREATE TABLE IF NOT EXISTS agent_usage (
     latency_seconds    DOUBLE
 );
 
+-- Audit log for write-action proposals and decisions
+CREATE TABLE IF NOT EXISTS action_proposals (
+    id           BIGINT PRIMARY KEY,
+    timestamp    TIMESTAMP NOT NULL,
+    question     VARCHAR,
+    action       VARCHAR NOT NULL,
+    action_args  VARCHAR,
+    decision     VARCHAR NOT NULL,
+    decided_at   TIMESTAMP NOT NULL
+);
+
+-- Eval harness results — one row per question per run
+CREATE TABLE IF NOT EXISTS eval_results (
+    run_id              VARCHAR NOT NULL,
+    question_id         VARCHAR NOT NULL,
+    category            VARCHAR,
+    question            VARCHAR,
+    agent_answer        VARCHAR,
+    model               VARCHAR,
+    check_type          VARCHAR,
+    programmatic_pass   BOOLEAN,
+    programmatic_detail VARCHAR,
+    judge_score         INTEGER,
+    judge_reason        VARCHAR,
+    judge_model         VARCHAR,
+    judge_cost_usd      DOUBLE,
+    composite_score     DOUBLE,
+    n_llm_calls         INTEGER,
+    input_tokens        INTEGER,
+    output_tokens       INTEGER,
+    cache_read_tokens   INTEGER,
+    agent_cost_usd      DOUBLE,
+    latency_seconds     DOUBLE,
+    error               VARCHAR,
+    timestamp           TIMESTAMP NOT NULL,
+    PRIMARY KEY (run_id, question_id)
+);
+
 -- Index for time-range queries
 CREATE INDEX IF NOT EXISTS idx_snapshots_timestamp ON snapshots(timestamp);
 CREATE INDEX IF NOT EXISTS idx_agent_usage_timestamp ON agent_usage(timestamp);
+CREATE INDEX IF NOT EXISTS idx_action_proposals_timestamp ON action_proposals(timestamp);
+CREATE INDEX IF NOT EXISTS idx_eval_results_run_id ON eval_results(run_id);
 """
 
 

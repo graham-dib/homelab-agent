@@ -1,0 +1,473 @@
+# dibo-agent evaluation questions
+# 25 questions across 5 categories, ordered roughly by tool depth.
+# Run with: python -m eval.runner
+
+# ── SYSTEM (Q01–Q07) ─────────────────────────────────────────────────────────
+
+- id: Q01
+  category: system
+  question: "Is dibo currently reachable? Report its hostname and kernel version."
+  expected:
+    type: regex
+    patterns:
+      - "(?i)dibo"
+      - "\\d+\\.\\d+"
+      - "(?i)reach|up|online|connect"
+  judge:
+    enabled: true
+    rubric: |
+      Score 5 if the answer states dibo is reachable, names the hostname,
+      and includes a kernel version string with real numbers. Score 4 if two
+      of the three are present. Score 2 if the answer is correct but vague
+      ("yes it's up"). Score 1 if wrong or hallucinated.
+  tags: [fast, no-history]
+
+- id: Q02
+  category: system
+  question: "What is the current disk usage percentage on /srv/storage? How many GB are used and available?"
+  expected:
+    type: numeric_range
+    values:
+      - name: storage_pct
+        extract_pattern: "(?i)/srv/storage[^\\d]*(\\d+)%|(?i)(\\d+)%.*storage|storage.*(\\d+)%"
+        low: 75
+        high: 99
+        unit: "%"
+  judge:
+    enabled: true
+    rubric: |
+      Score 5 if the answer gives the exact percentage for /srv/storage and
+      also reports GB used and available. Score 4 if percentage is correct
+      but GB breakdown is missing. Score 3 if answer mentions high disk usage
+      without a precise number. Score 1 if wrong partition or no number.
+  tags: [fast, no-history]
+
+- id: Q03
+  category: system
+  question: "What are the current CPU load averages on dibo? Is the system under stress?"
+  expected:
+    type: regex
+    patterns:
+      - "\\d+\\.\\d+"
+  judge:
+    enabled: true
+    rubric: |
+      Score 5 if the answer reports 1-min, 5-min, and 15-min load averages
+      with actual numbers, states the CPU count, and gives a clear verdict on
+      whether the system is under stress (with a threshold, e.g. load > cores).
+      Score 4 if two of the three averages are given. Score 3 if only one
+      number is given with a correct verdict. Score 1 if no numbers or wrong tool.
+  tags: [fast, no-history]
+
+- id: Q04
+  category: system
+  question: "How much RAM is dibo using? Is swap active?"
+  expected:
+    type: regex
+    patterns:
+      - "(?i)\\d+.*MB|\\d+.*GB"
+      - "(?i)swap"
+  judge:
+    enabled: true
+    rubric: |
+      Score 5 if the answer gives total RAM, used RAM, and available RAM in
+      consistent units, and explicitly states whether swap is in use (with the
+      swap used amount). Score 4 if RAM numbers are present but swap detail
+      is vague. Score 3 if only one of RAM or swap is addressed. Score 1 if
+      hallucinated or no tool call made.
+  tags: [fast, no-history]
+
+- id: Q05
+  category: system
+  question: "Is the Docker service healthy on dibo? Check its systemd status."
+  expected:
+    type: regex
+    patterns:
+      - "(?i)docker"
+      - "(?i)active|running|healthy"
+  judge:
+    enabled: true
+    rubric: |
+      Score 5 if the answer checks the Docker systemd unit, reports its state
+      (active/inactive), and includes uptime. Score 4 if state is reported
+      but uptime is missing. Score 3 if the answer says Docker is running
+      without using the service_status tool. Score 1 if wrong tool or no call.
+  tags: [fast, no-history]
+
+- id: Q06
+  category: system
+  question: "What are the top 5 processes by CPU usage on dibo right now?"
+  expected:
+    type: regex
+    patterns:
+      - "\\d+\\.\\d+%|\\d+%"
+  judge:
+    enabled: true
+    rubric: |
+      Score 5 if the answer lists at least 5 processes with their names,
+      PIDs or owners, and CPU percentages. Score 4 if 3-4 processes are
+      listed with percentages. Score 3 if processes are listed without
+      percentages. Score 1 if the answer doesn't use the top_processes tool.
+  tags: [fast, no-history]
+
+- id: Q07
+  category: system
+  question: "What are the top 3 processes by memory usage on dibo? Which one is using the most?"
+  expected:
+    type: regex
+    patterns:
+      - "(?i)java|plex|omada|python"
+      - "\\d+"
+  judge:
+    enabled: true
+    rubric: |
+      Score 5 if the answer identifies the top 3 by memory with names and
+      sizes, and correctly identifies Omada/Java as typically the highest consumer.
+      Score 4 if top 3 are listed but without units or sizes. Score 3 if only
+      the top process is identified. Score 2 if the java/Omada process is
+      misidentified. Score 1 if no tool was used.
+  notes: "The Java process at ~2GB is Omada Controller. Don't misidentify it."
+  tags: [fast, no-history]
+
+# ── DOCKER (Q08–Q13) ──────────────────────────────────────────────────────────
+
+- id: Q08
+  category: docker
+  question: "Which Docker containers are currently running on dibo? List their names and states."
+  expected:
+    type: set_contains
+    required: [plex, adguard, transmission, omada]
+    excluded: []
+    case_insensitive: true
+  judge:
+    enabled: true
+    rubric: |
+      Score 5 if all four expected containers (plex, adguard, transmission,
+      omada) are listed with their states, and any stopped containers are
+      noted. Score 4 if all four are mentioned but states are omitted.
+      Score 3 if three of four are mentioned. Score 1 if fewer than three
+      expected services are listed.
+  tags: [fast, no-history]
+
+- id: Q09
+  category: docker
+  question: "How much memory is the Plex container currently using? What percentage of the system RAM is that?"
+  expected:
+    type: numeric_range
+    values:
+      - name: plex_mem_mb
+        extract_pattern: "(?i)plex[^\\d]*(\\d+)\\s*MB|(\\d+)\\s*MB.*plex"
+        low: 500
+        high: 8000
+        unit: "MB"
+  judge:
+    enabled: true
+    rubric: |
+      Score 5 if the answer gives Plex memory in MB (or GB with precision),
+      the total system RAM, and the percentage Plex represents. Score 4 if
+      memory is given but the system RAM context is missing. Score 3 if a
+      ballpark is given without exact numbers. Score 1 if Plex is not found
+      or the container stats tool wasn't used.
+  tags: [fast, no-history]
+
+- id: Q10
+  category: docker
+  question: "Is the Plex container healthy? How long has it been running and how many times has it restarted?"
+  expected:
+    type: regex
+    patterns:
+      - "(?i)healthy|health"
+      - "(?i)restart"
+      - "\\d+"
+  judge:
+    enabled: true
+    rubric: |
+      Score 5 if the answer states health status ('healthy'/'unhealthy'/null),
+      gives uptime in a human-readable format, and gives the exact restart count.
+      Score 4 if health and restarts are given but uptime is vague. Score 3
+      if only one of the three is accurate. Score 1 if inspect_container
+      was not called.
+  tags: [fast, no-history]
+
+- id: Q11
+  category: docker
+  question: "Have any containers restarted unexpectedly in the last 24 hours?"
+  expected:
+    type: judge_only
+  judge:
+    enabled: true
+    rubric: |
+      Score 5 if the answer calls find_recently_restarted_containers with
+      since_hours=24, reports the result (empty list = no restarts), and gives
+      a clear verdict. Score 4 if the result is correct but the tool name
+      isn't evident from the reasoning. Score 2 if the agent checks container
+      states manually without using the dedicated restart-detection tool.
+      Score 1 if no tool call is made.
+  tags: [fast, no-history]
+
+- id: Q12
+  category: docker
+  question: "What is the CPU usage of the Omada controller container? Is its memory usage expected?"
+  expected:
+    type: numeric_range
+    values:
+      - name: omada_mem_mb
+        extract_pattern: "(?i)omada[^\\d]*(\\d+)\\s*(?:MB|mb)|(\\d+)\\s*(?:MB|mb).*omada"
+        low: 1000
+        high: 4000
+        unit: "MB"
+  judge:
+    enabled: true
+    rubric: |
+      Score 5 if the answer gives Omada's CPU % and memory (noting the ~2GB
+      is expected for Java + MongoDB). Score 4 if both metrics are given but
+      the Java explanation is missing. Score 3 if only one metric is present.
+      Score 2 if the answer flags the memory as anomalous without explaining
+      it's a Java process. Score 1 if container stats tool wasn't used.
+  notes: "Omada ~2GB memory is expected. Agent should recognise this, not flag it."
+  tags: [fast, no-history]
+
+- id: Q13
+  category: docker
+  question: "Show me the last 20 lines of logs from the AdGuard container. Are there any errors?"
+  expected:
+    type: judge_only
+  judge:
+    enabled: true
+    rubric: |
+      Score 5 if the answer fetches real log lines from the adguard container,
+      reports what they contain (typical INFO-level DNS queries, startup lines,
+      or errors if present), and gives a clear verdict on error presence.
+      Score 4 if logs are fetched and the verdict is clear but no representative
+      lines are quoted. Score 3 if the answer is vague about what was in the
+      logs. Score 1 if get_container_logs wasn't called.
+  tags: [fast, no-history]
+
+# ── ADGUARD / NETWORK (Q14–Q18) ──────────────────────────────────────────────
+
+- id: Q14
+  category: adguard
+  question: "Is AdGuard Home's DNS protection currently enabled? What version is running?"
+  expected:
+    type: bool_flag
+    expected_value: true
+    yes_words: ["enabled", "active", "protection is on", "is enabled", "currently enabled"]
+    no_words: ["disabled", "not enabled", "protection is off", "is disabled"]
+  judge:
+    enabled: true
+    rubric: |
+      Score 5 if the answer confirms protection is enabled, gives the AdGuard
+      version string, and mentions the DNS port (53). Score 4 if protection
+      state and version are present but port is missing. Score 3 if only one
+      of the two facts is present. Score 1 if the status tool wasn't called.
+  tags: [fast, no-history]
+
+- id: Q15
+  category: adguard
+  question: "How many DNS queries has AdGuard processed in the last 24 hours? What percentage were blocked?"
+  expected:
+    type: regex
+    patterns:
+      - "\\d{3,}"
+      - "(?i)block|filter"
+      - "\\d+\\.?\\d*%"
+  judge:
+    enabled: true
+    rubric: |
+      Score 5 if the answer gives total queries (with the caveat that this is
+      a rolling 24h window), blocked count, and block rate as a percentage.
+      Score 4 if all three numbers are present but the rolling-window caveat
+      is missing. Score 3 if only total queries or only block rate is given.
+      Score 1 if the stats tool wasn't called or numbers are hallucinated.
+  notes: "AdGuard stats are a rolling 24h window — not cumulative."
+  tags: [fast, no-history]
+
+- id: Q16
+  category: adguard
+  question: "What are the top 3 most-blocked domains on dibo's network?"
+  expected:
+    type: judge_only
+  judge:
+    enabled: true
+    rubric: |
+      Score 5 if the answer lists at least 3 domains with their block counts,
+      using either get_adguard_top_blocked or get_adguard_stats. Score 4 if
+      domains are listed but counts are missing. Score 3 if fewer than 3
+      domains are identified. Score 1 if no tool call made or list fabricated.
+  tags: [fast, no-history]
+
+- id: Q17
+  category: adguard
+  question: "Which device on the network is making the most DNS requests? What is its IP and query count?"
+  expected:
+    type: regex
+    patterns:
+      - "(?:\\d{1,3}\\.){3}\\d{1,3}"
+      - "\\d{3,}"
+  judge:
+    enabled: true
+    rubric: |
+      Score 5 if the answer gives the top client's IP and query count, and
+      preferably identifies what device it might be. Score 4 if IP and count
+      are given without device identification. Score 3 if only the IP or only
+      the count is given. Score 1 if the top_clients tool wasn't called.
+  tags: [fast, no-history]
+
+- id: Q18
+  category: adguard
+  question: "Have there been any DNS queries to sentry.io or Microsoft telemetry domains in the last 50 queries?"
+  expected:
+    type: judge_only
+  judge:
+    enabled: true
+    rubric: |
+      Score 5 if the agent calls get_adguard_query_log with an appropriate
+      limit and searches for sentry or microsoft, then reports what it found
+      (present or absent). Score 4 if the search is done but the reporting
+      is vague. Score 3 if only one domain is checked. Score 2 if the agent
+      checks top_blocked instead of the query log. Score 1 if no tool called.
+  tags: [fast, no-history]
+
+# ── HISTORY / TEMPORAL (Q19–Q22) ─────────────────────────────────────────────
+
+- id: Q19
+  category: history
+  question: >
+    How much historical data has been collected in the metrics database?
+    What time range does it cover and how many snapshots are there?
+  expected:
+    type: regex
+    patterns:
+      - "\\d+"
+      - "(?i)snapshot|day|hour"
+  judge:
+    enabled: true
+    rubric: |
+      Score 5 if the answer calls get_snapshot_coverage and reports: snapshot
+      count, earliest timestamp, latest timestamp, and total span in human
+      terms (e.g. "4.4 days"). Score 4 if count and span are given but
+      timestamps are omitted. Score 3 if only span or only count is given.
+      Score 1 if no history tool was called.
+  tags: [no-history-needed, fast]
+  notes: "This is a meta question about the DB itself. Should be cheap."
+
+- id: Q20
+  category: history
+  question: >
+    Has /srv/storage disk usage been increasing, stable, or decreasing over
+    the data collection period? Be specific about what the data shows.
+  expected:
+    type: judge_only
+  judge:
+    enabled: true
+    rubric: |
+      Score 5 if the agent: (a) calls get_snapshot_coverage to confirm data
+      span, (b) queries disk_usage history for /srv/storage over time,
+      (c) reports the actual pct_used values at start and end (or min/max),
+      (d) gives a verdict supported by the numbers. Score 4 if the query is
+      correct but the span check is skipped. Score 3 if the verdict is given
+      without specific numbers. Score 2 if the agent claims a trend without
+      querying history. Score 1 if no history tool called.
+  tags: [requires-history]
+
+- id: Q21
+  category: history
+  question: >
+    Was there any gap in data collection? If so, when did it occur and
+    how long did it last?
+  expected:
+    type: judge_only
+  judge:
+    enabled: true
+    rubric: |
+      Score 5 if the agent writes a SQL query using LAG() or epoch() to find
+      gaps > 10 minutes, finds the 2026-05-14 outage gap (~15h41m), and
+      reports start/end times and duration. Score 4 if the gap is found but
+      duration or times are imprecise. Score 3 if the agent checks coverage
+      but doesn't query for gaps specifically. Score 2 if the agent claims
+      "no gaps" without querying. Score 1 if no SQL query executed.
+  tags: [requires-history]
+  notes: "The known gap: 2026-05-13 18:43 UTC → 2026-05-14 10:25 UTC (15h41m)."
+
+- id: Q22
+  category: history
+  question: >
+    Are AdGuard's DNS query counts trending up or down over the collection
+    period? Be honest about what the data can support.
+  expected:
+    type: judge_only
+  judge:
+    enabled: true
+    rubric: |
+      Score 5 if the agent: (a) calls get_snapshot_coverage, (b) queries
+      adguard_stats history, (c) correctly accounts for the rolling 24h window
+      (counts reset as old data ages out), (d) makes only claims the data
+      supports. Score 4 if the query is correct but the rolling-window caveat
+      is missing. Score 3 if a trend is stated with some data but missing the
+      window caveat. Score 2 if the agent states a trend with no history query.
+      Score 1 if hallucinated.
+  tags: [requires-history]
+  notes: >
+    AdGuard stats are a rolling 24h window — negative deltas are expected
+    and mean old queries aged out, not that AdGuard restarted.
+
+# ── CROSS-CUTTING (Q23–Q25) ───────────────────────────────────────────────────
+
+- id: Q23
+  category: cross-cutting
+  question: >
+    dibo hasn't been responding to Plex. Diagnose what might be wrong —
+    check the container health, recent logs, and any relevant system metrics.
+  expected:
+    type: judge_only
+  judge:
+    enabled: true
+    rubric: |
+      Score 5 if the agent: (a) checks Plex container health/restart count,
+      (b) fetches recent Plex logs and identifies any errors, (c) checks
+      system-level resources (disk, memory, load) for anything that could
+      cause unresponsiveness, (d) synthesises a clear verdict. Score 4 if
+      two of the three areas are covered with specifics. Score 3 if only
+      one area is covered. Score 2 if the agent just checks container state
+      without logs or system context. Score 1 if no tools called.
+  tags: [multi-signal, no-history]
+
+- id: Q24
+  category: cross-cutting
+  question: >
+    Is the network/DNS layer healthy? Check AdGuard protection status,
+    current query load, and whether any unusually high traffic source is present.
+  expected:
+    type: judge_only
+  judge:
+    enabled: true
+    rubric: |
+      Score 5 if the answer covers: protection state, query count with block
+      rate, top client IP and query volume (flagging if it seems anomalously
+      high). Score 4 if protection state and query volume are covered but
+      top-client analysis is missing. Score 3 if only one signal is checked.
+      Score 1 if no AdGuard tools called.
+  tags: [multi-signal, no-history]
+
+- id: Q25
+  category: cross-cutting
+  question: >
+    Is dibo healthy across the board right now? Give me a concise summary
+    covering system resources, containers, and DNS.
+  expected:
+    type: judge_only
+  judge:
+    enabled: true
+    rubric: |
+      Score 5 if the answer covers all three domains with real numbers:
+      (1) system — disk %, memory %, load with actual values,
+      (2) containers — all four named (plex, adguard, transmission, omada)
+          with states, no unexpected restarts,
+      (3) DNS — AdGuard protection enabled, ballpark query count.
+      Score 4 if two of three domains covered with specifics. Score 3 if
+      all three mentioned but without numbers. Score 2 if only one domain
+      is addressed with specifics. Score 1 if vague or no tools called.
+  tags: [multi-signal, cross-cutting, no-history]
+  notes: >
+    Expected cost: $0.20-0.40 in multi-agent mode (14 LLM calls).
+    Run last in any filtered eval to avoid skewing cost estimates.

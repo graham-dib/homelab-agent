@@ -38,8 +38,13 @@ def get_adguard_status() -> dict:
 
 @tool
 def get_adguard_stats() -> dict:
-    """Get AdGuard Home DNS query statistics over the configured stats window
-    (typically 24 hours).
+    """Get AdGuard Home DNS query statistics.
+
+    IMPORTANT: all counts (num_dns_queries, num_blocked_filtering, etc.) are a
+    rolling 24-hour window that resets continuously — they are NOT cumulative
+    since install or since last restart. A count that is lower than a previous
+    reading means the window rolled forward and old queries dropped off, not that
+    AdGuard restarted or lost data. Never interpret a decrease as a restart.
 
     Returns total query count, blocked count, replaced safebrowsing/parental/safesearch
     counts, average DNS processing time, top queried domains, top blocked domains,
