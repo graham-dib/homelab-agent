@@ -104,6 +104,9 @@ A `UsageTracker` LangChain callback accumulates input/output/cache tokens across
 | **Write** | `restart_container` | Docker restart — requires approval |
 | | `flush_adguard_cache` | Clear DNS cache — requires approval |
 | | `reboot_dibo` | Full server reboot — requires approval |
+| | `kill_torrent` | Stop (pause) a Transmission torrent — requires approval |
+| | `enable_adguard_protection` | Toggle AdGuard DNS filtering on/off — requires approval |
+| | `set_download_limit` | Cap Transmission global download speed — requires approval |
 
 ---
 
@@ -199,6 +202,21 @@ pytest tests/ -v
 ```bash
 # Run on dibo against its live metrics DB
 ssh <user>@dibo 'cd homelab-agent && .venv/bin/python -m homelab_agent.multi_agent'
+
+# Streamlit UI
+streamlit run app.py   # http://localhost:8501
+
+# Alert dry-run (prints health summary, shows what would be pushed)
+python -m homelab_agent.alert --dry-run
+```
+
+```bash
+# Deploy alert timer on dibo (runs every 30 min, pushes to ntfy.sh)
+# 1. Add NTFY_TOPIC=your-topic to dibo's .env
+# 2. Copy the units and enable:
+sudo cp deploy/dibo-alert.{service,timer} /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now dibo-alert.timer
 ```
 
 ---
@@ -215,8 +233,5 @@ pytest tests/ -v  # ~15s, requires dibo on Tailscale
 
 ## What I'd do with more time
 
-- **More write tools** — `kill_torrent`, `enable_adguard_protection`, `set_download_limit`; each with the same interrupt/audit pattern
 - **Persistent checkpoints** — swap `InMemorySaver` for `SqliteSaver` so interrupted write actions survive process restarts
-- **Alert hooks** — cron job that queries the agent ("is anything degraded?") and sends a push notification if the answer contains a warning
-- **Eval on dibo** — re-run the 25-question harness on dibo against its live DuckDB to get valid history/temporal scores; history questions (Q19–Q25) currently can't be evaluated from the dev machine
 - **Loom walkthrough** — 3-minute demo showing agent diagnosing a real issue end-to-end

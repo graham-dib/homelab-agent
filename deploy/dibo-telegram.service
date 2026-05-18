@@ -1,0 +1,16 @@
+[Unit]
+Description=dibo-agent Telegram bot
+After=network-online.target
+
+[Service]
+Type=simple
+User=graham
+WorkingDirectory=/home/graham/homelab-agent
+ExecStart=/home/graham/homelab-agent/.venv/bin/python -m homelab_agent.telegram_bot
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

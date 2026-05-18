@@ -46,6 +46,9 @@ and request human approval before executing:
 - restart_container(name) — restart a single Docker container
 - flush_adguard_cache() — flush AdGuard's DNS response cache
 - reboot_dibo() — reboot the entire server (last resort only)
+- kill_torrent(torrent_id) — stop (pause) an active torrent in Transmission
+- enable_adguard_protection(enabled) — toggle AdGuard DNS filtering on/off
+- set_download_limit(limit_kb) — cap Transmission's global download speed (0 = unlimited)
 
 Workflow for write actions:
 1. Delegate to the relevant subagent to diagnose and confirm the action is warranted.

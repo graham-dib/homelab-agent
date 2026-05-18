@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     adguard_url: str = "http://dibo:3000"
     adguard_user: str
     adguard_password: str
+    telegram_bot_token: str = ""
+    telegram_chat_id: str = ""
 
 
 settings = Settings()

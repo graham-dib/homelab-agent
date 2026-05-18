@@ -100,8 +100,105 @@ def reboot_dibo() -> str:
     return "Reboot command sent. dibo will be offline for ~2 minutes."
 
 
+@tool
+def kill_torrent(torrent_id: str) -> str:
+    """Stop (pause) an active torrent in Transmission.
+
+    This pauses the torrent — download and upload cease but the torrent and its
+    data are kept. The operator can resume it manually at any time. Use when a
+    torrent is consuming too much bandwidth or needs to be held.
+    REQUIRES HUMAN APPROVAL before executing.
+
+    Args:
+        torrent_id: Transmission torrent ID or hash (use get_container_logs on
+                    'transmission' and look for the torrent list, or use
+                    'transmission-remote localhost -l' output)
+    """
+    decision = interrupt({
+        "action": "kill_torrent",
+        "args": {"torrent_id": torrent_id},
+        "warning": f"Will stop (pause) torrent {torrent_id!r} in Transmission. Data is kept; torrent can be resumed.",
+        "reversible": True,
+    })
+    if decision != "approved":
+        return f"[CANCELLED] kill_torrent(torrent_id={torrent_id!r}) was not approved by the operator."
+    result = run_on_dibo(
+        f"docker exec transmission transmission-remote localhost:9091 -t {torrent_id} --stop",
+        timeout=15,
+    )
+    return f"Torrent {torrent_id!r} stopped. Result: {result.stdout.strip() or 'OK'}"
+
+
+@tool
+def enable_adguard_protection(enabled: bool) -> str:
+    """Enable or disable AdGuard Home DNS protection.
+
+    When disabled, AdGuard passes all DNS queries through to upstream resolvers
+    without filtering — no ads or domains are blocked. Use to temporarily lift
+    filtering (e.g. to diagnose a false positive), then re-enable promptly.
+    REQUIRES HUMAN APPROVAL before executing.
+
+    Args:
+        enabled: True to turn protection on, False to turn it off.
+    """
+    state = "enable" if enabled else "DISABLE"
+    warning = (
+        "Turns AdGuard DNS protection ON — normal filtering resumes."
+        if enabled
+        else "DISABLES AdGuard DNS filtering — all DNS queries pass through unblocked."
+    )
+    decision = interrupt({
+        "action": "enable_adguard_protection",
+        "args": {"enabled": enabled},
+        "warning": warning,
+        "reversible": True,
+    })
+    if decision != "approved":
+        return f"[CANCELLED] enable_adguard_protection(enabled={enabled}) was not approved by the operator."
+    with _adguard_client() as c:
+        c.post("/protection", json={"enabled": enabled}).raise_for_status()
+    return f"AdGuard DNS protection {'enabled' if enabled else 'disabled'} successfully."
+
+
+@tool
+def set_download_limit(limit_kb: int) -> str:
+    """Set the global download speed limit in Transmission.
+
+    Applies to all active torrents immediately. Set to 0 to remove the limit.
+    Useful when dibo's bandwidth is needed for other tasks (streaming, backups)
+    or when a torrent is saturating the connection.
+    REQUIRES HUMAN APPROVAL before executing.
+
+    Args:
+        limit_kb: Download speed cap in KB/s. 0 = unlimited.
+    """
+    if limit_kb < 0:
+        return "Error: limit_kb must be 0 (unlimited) or a positive number."
+
+    if limit_kb == 0:
+        display = "unlimited (remove limit)"
+        cmd = "docker exec transmission transmission-remote localhost:9091 --no-downlimit"
+    else:
+        display = f"{limit_kb} KB/s"
+        cmd = f"docker exec transmission transmission-remote localhost:9091 --downlimit {limit_kb}"
+
+    decision = interrupt({
+        "action": "set_download_limit",
+        "args": {"limit_kb": limit_kb},
+        "warning": f"Will set Transmission global download limit to {display}. Takes effect immediately on all active torrents.",
+        "reversible": True,
+    })
+    if decision != "approved":
+        return f"[CANCELLED] set_download_limit(limit_kb={limit_kb}) was not approved by the operator."
+    result = run_on_dibo(cmd, timeout=10)
+    return f"Download limit set to {display}. Result: {result.stdout.strip() or 'OK'}"
+
+
 WRITE_TOOLS = [
     restart_container,
     flush_adguard_cache,
     reboot_dibo,
+    kill_torrent,
+    enable_adguard_protection,
+    set_download_limit,
 ]

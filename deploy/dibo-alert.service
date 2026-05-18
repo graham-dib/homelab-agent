@@ -1,0 +1,11 @@
+[Unit]
+Description=dibo-agent health alert
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=graham
+WorkingDirectory=/home/graham/homelab-agent
+ExecStart=/home/graham/homelab-agent/.venv/bin/python -m homelab_agent.alert
+StandardOutput=journal
+StandardError=journal
