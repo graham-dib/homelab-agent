@@ -19,7 +19,7 @@ The homelab is a vehicle. The patterns are the point.
           └─────────┘       └─────────┘       └─────────┘
           disk/mem/CPU       DNS/AdGuard      Plex/Torrent
           containers         query logs        /Omada logs
-          systemd svc        block rates       health state
+          storage tools      block rates       health state
           history tools      history tools     history tools
 
                          ┌──────────────────┐
@@ -28,10 +28,29 @@ The homelab is a vehicle. The patterns are the point.
                          │ flush_adguard_   │  interrupt() → human
                          │   cache          │  approval gate
                          │ reboot_dibo      │
+                         │ kill_torrent     │
+                         │ enable_adguard_  │
+                         │   protection     │
+                         │ set_download_    │
+                         │   limit          │
                          └──────────────────┘
+
+   ┌──────────────────────────────────────────────────┐
+   │  Telegram Bot (primary access point)             │
+   │  • Two-way chat with per-session memory (10 msg) │
+   │  • Deletion approval flow (HITL via reply)       │
+   │  • Running 24/7 on dibo as systemd service       │
+   └──────────────────────────────────────────────────┘
+
+   ┌──────────────────────────────────────────────────┐
+   │  Proactive Alert Timer (every 6h)                │
+   │  • Instant Telegram warning on degraded signals  │
+   │  • Daily digest at 08:00 London time             │
+   │  • State persisted across restarts               │
+   └──────────────────────────────────────────────────┘
 ```
 
-**Stack:** Python 3.12 · LangGraph 1.2 + LangChain 1.3 · `langgraph-supervisor` 0.0.31 · Claude Sonnet 4.5 · Fabric/paramiko (SSH) · httpx (AdGuard REST) · DuckDB (metrics store) · pydantic-settings
+**Stack:** Python 3.12 · LangGraph 1.2 + LangChain 1.3 · `langgraph-supervisor` 0.0.31 · Claude Sonnet 4.5 · Fabric/paramiko (SSH) · httpx (AdGuard REST + Telegram Bot API) · DuckDB (metrics store) · pydantic-settings
 
 **Server:** "dibo" — 2017 MacBook Pro running Ubuntu 24, hosting Plex, AdGuard Home, Transmission, and the TP-Link Omada controller in Docker.
 
@@ -64,15 +83,26 @@ LLM proposes action → interrupt() → graph pauses → operator sees:
 
 Every proposal and decision is written to the `action_proposals` audit table immediately, regardless of outcome.
 
-### 3. Temporal humility
+### 3. Telegram-native HITL for file deletion
+
+The Telegram bot implements its own approval flow for file deletions — no `interrupt()` required. When the agent identifies files to remove, it outputs a structured `DELETION_CANDIDATES` block. The bot parses this, strips it from the visible reply, stores the paths, and asks for yes/no confirmation. On approval it SSHes directly to dibo and executes `rm -f`. Paths are restricted to `/srv/` as a safety guard.
+
+```
+Agent response → DELETION_CANDIDATES block detected →
+  "Reply 'yes' to delete 3 file(s), or 'no' to cancel."
+→ 'yes' → SSH rm -f → "Deleted 3 file(s) (~51 GB freed)."
+→ 'no'  → "Deletion cancelled."
+```
+
+### 4. Temporal humility
 
 Before any claim involving trends or change over time, the agent calls `get_snapshot_coverage` to find out how much history exists. If the data span is too short to support the claim, it says so explicitly rather than guessing. This came from a real incident: in early runs the agent claimed AdGuard trends with only 1.7 hours of data.
 
-### 4. Read-only SQL with an allowlist
+### 5. Read-only SQL with an allowlist
 
 `query_history` accepts user-supplied SQL but enforces a strict allowlist: only `SELECT` and `WITH` are permitted at the statement level. `DROP`, `DELETE`, `INSERT`, `UPDATE`, and `PRAGMA` all raise an error before touching the database.
 
-### 5. Cost tracking at every query
+### 6. Cost tracking at every query
 
 A `UsageTracker` LangChain callback accumulates input/output/cache tokens across all LLM calls in a run (supervisor + all subagent calls). On completion it computes USD cost and writes a row to `agent_usage`. Running cost across all sessions is queryable in seconds.
 
@@ -99,6 +129,9 @@ A `UsageTracker` LangChain callback accumulates input/output/cache tokens across
 | | `get_adguard_query_log` | Recent DNS queries with filter |
 | | `get_adguard_top_blocked` | Most-blocked domains |
 | | `get_adguard_top_clients` | Most-active DNS clients |
+| **Storage** | `get_directory_sizes` | Directory sizes sorted by usage |
+| | `find_large_files` | Largest files above a size threshold |
+| | `find_old_files` | Files not modified recently above a size threshold |
 | **History** | `query_history` | Read-only SQL on DuckDB metrics store |
 | | `get_snapshot_coverage` | Data span check before temporal claims |
 | **Write** | `restart_container` | Docker restart — requires approval |
@@ -107,6 +140,7 @@ A `UsageTracker` LangChain callback accumulates input/output/cache tokens across
 | | `kill_torrent` | Stop (pause) a Transmission torrent — requires approval |
 | | `enable_adguard_protection` | Toggle AdGuard DNS filtering on/off — requires approval |
 | | `set_download_limit` | Cap Transmission global download speed — requires approval |
+| | `delete_files` | Permanently remove files under /srv/ — requires approval |
 
 ---
 
@@ -117,6 +151,34 @@ A systemd timer on dibo runs `python -m homelab_agent.ingest.snapshot` every 5 m
 **Schema:** `snapshots`, `disk_usage`, `memory_stats`, `load_average`, `container_stats`, `adguard_stats`, `agent_usage`, `action_proposals`
 
 The timer uses `Persistent=true` — if dibo reboots mid-cycle, missed runs are caught up automatically.
+
+---
+
+## Proactive alerts
+
+A systemd timer runs `python -m homelab_agent.alert` every 6 hours. Each run invokes the single agent with a health summary question and checks the response against a set of warning patterns (degraded, unhealthy, failed, 85%+ disk usage, etc.).
+
+- **Instant warning**: Telegram message sent immediately if warning patterns are detected.
+- **Daily digest**: Sent once per day at 08:00 London time — check count, warning count, and current state.
+- **State persistence**: `alert_state.json` tracks daily counters across process restarts.
+- **Cost**: ~4 runs/day × ~$0.04 = ~$0.16/day.
+
+```bash
+# Dry-run (prints what would be sent without messaging)
+python -m homelab_agent.alert --dry-run
+```
+
+---
+
+## Telegram bot
+
+The primary access point for the agent. Runs as a persistent systemd service on dibo, long-polling the Telegram Bot API.
+
+- **Two-way chat**: Any message is routed to the single agent and replied to directly.
+- **Conversation memory**: Last 10 messages per session kept in context for follow-up questions.
+- **Auth-gated**: Only responds to the configured `TELEGRAM_CHAT_ID` — all other senders are silently ignored.
+- **Deletion approval**: Agent proposes file deletions; bot intercepts the proposal and asks for explicit yes/no before executing.
+- **Cost**: ~$0.01–0.05 per message when active; $0 when idle.
 
 ---
 
@@ -156,15 +218,19 @@ python -m eval.runner --agent single --model qwen2.5:14b --ollama-host <desktop-
 python -m eval.report --compare <run_a> <run_b>
 ```
 
+---
+
 ## Costs
 
 Measured on Claude Sonnet 4.5 (May 2026 pricing: $3/M input, $15/M output):
 
 | Query type | LLM calls | Approx. cost |
 |------------|-----------|--------------|
-| Single-domain question | 2–4 | ~$0.01–0.05 |
-| Cross-cutting health check | 10–14 | ~$0.20–0.40 |
+| Telegram message (single-domain) | 2–4 | ~$0.01–0.05 |
+| Telegram message (cross-cutting) | 10–14 | ~$0.20–0.40 |
+| Alert health check (6h cadence) | 2–4 | ~$0.04 |
 | HITL write action (approve path) | 2 | ~$0.009 |
+| **Alert timer (daily total)** | — | **~$0.16/day** |
 
 All costs are persisted to `agent_usage` and queryable:
 
@@ -186,7 +252,7 @@ print(f'Total spent: \${total:.4f}')
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-# Single-agent (19 tools, hardcoded test questions)
+# Single-agent (22 tools, hardcoded test questions)
 python -m homelab_agent.agent
 
 # Multi-agent supervisor with HITL
@@ -200,23 +266,20 @@ pytest tests/ -v
 ```
 
 ```bash
-# Run on dibo against its live metrics DB
-ssh <user>@dibo 'cd homelab-agent && .venv/bin/python -m homelab_agent.multi_agent'
-
-# Streamlit UI
-streamlit run app.py   # http://localhost:8501
-
-# Alert dry-run (prints health summary, shows what would be pushed)
+# Alert dry-run (prints health summary, shows what would be sent)
 python -m homelab_agent.alert --dry-run
+
+# Run Telegram bot locally for testing
+python -m homelab_agent.telegram_bot
 ```
 
 ```bash
-# Deploy alert timer on dibo (runs every 30 min, pushes to ntfy.sh)
-# 1. Add NTFY_TOPIC=your-topic to dibo's .env
-# 2. Copy the units and enable:
+# Deploy on dibo (requires TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID in .env)
 sudo cp deploy/dibo-alert.{service,timer} /etc/systemd/system/
+sudo cp deploy/dibo-telegram.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now dibo-alert.timer
+sudo systemctl enable --now dibo-telegram.service
 ```
 
 ---
@@ -233,5 +296,6 @@ pytest tests/ -v  # ~15s, requires dibo on Tailscale
 
 ## What I'd do with more time
 
-- **Persistent checkpoints** — swap `InMemorySaver` for `SqliteSaver` so interrupted write actions survive process restarts
-- **Loom walkthrough** — 3-minute demo showing agent diagnosing a real issue end-to-end
+- **Streamlit UI** — chat interface with a tool-call trace panel and a HITL approvals queue for surfacing pending write actions; the Telegram bot is the current primary access point but a browser UI would make the agent more demonstrable
+- **Persistent checkpoints** — swap `InMemorySaver` for `SqliteSaver` so interrupted write actions survive process restarts; Telegram conversation history is currently in-process only
+- **Loom walkthrough** — 3-minute demo showing agent diagnosing a real issue and executing a HITL write action end-to-end

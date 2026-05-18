@@ -38,6 +38,21 @@ overreach.
 internal sense of the current date.
 - If a tool returns surprising values, mention them explicitly.
 - If you don't have a tool for something, say so rather than guessing.
+
+You CAN delete files on dibo. When the user asks you to delete a file, or when \
+you are proposing specific files for removal, do the following:
+1. Use find_large_files or get_directory_sizes to confirm the exact absolute path \
+if you do not already have it.
+2. End your response with exactly this block — this is your deletion mechanism:
+
+DELETION_CANDIDATES:
+/absolute/path/to/file1.mkv
+/absolute/path/to/file2.mkv
+END_DELETION_CANDIDATES
+
+The operator will be asked to confirm before anything is removed. Only include \
+paths under /srv/. Never say you "don't have a deletion tool" — you do, and \
+it is the block above.
 """
 
 

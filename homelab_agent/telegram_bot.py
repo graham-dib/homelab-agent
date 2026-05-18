@@ -3,12 +3,20 @@
 Only responds to the chat ID set in TELEGRAM_CHAT_ID (your personal chat).
 Messages from any other chat are silently ignored.
 
+Deletion approval flow:
+  When the agent proposes files for deletion it includes a DELETION_CANDIDATES
+  block. The bot strips this from the visible reply, stores the paths, and asks
+  for yes/no confirmation. On "yes" it SSHes to dibo and removes the files
+  directly. On anything else it cancels.
+
 Deploy:
     sudo cp deploy/dibo-telegram.service /etc/systemd/system/
     sudo systemctl enable --now dibo-telegram.service
 """
 from __future__ import annotations
 
+import re
+import shlex
 import sys
 import time
 from uuid import uuid4
@@ -22,6 +30,20 @@ from homelab_agent.config import settings
 
 POLL_TIMEOUT = 30   # long-poll seconds per getUpdates call
 
+_DELETION_RE = re.compile(
+    r"DELETION_CANDIDATES:\n(.*?)\nEND_DELETION_CANDIDATES",
+    re.DOTALL,
+)
+
+# chat_id → list of /srv/ paths awaiting yes/no confirmation
+_pending_deletions: dict[int, list[str]] = {}
+
+# chat_id → list of (role, content) message pairs, capped at MAX_HISTORY
+MAX_HISTORY = 10
+_chat_histories: dict[int, list[tuple[str, str]]] = {}
+
+
+# ── Telegram API ──────────────────────────────────────────────────────────────
 
 def _api(path: str) -> str:
     return f"https://api.telegram.org/bot{settings.telegram_bot_token}/{path}"
@@ -70,15 +92,72 @@ def _typing(chat_id: int) -> None:
         pass
 
 
-def _run_agent(question: str) -> str:
+# ── Deletion flow ─────────────────────────────────────────────────────────────
+
+def _extract_deletion_proposal(text: str) -> tuple[str, list[str]]:
+    """Strip the DELETION_CANDIDATES block from the agent reply.
+
+    Returns (display_text, paths). paths is empty if no block found.
+    """
+    m = _DELETION_RE.search(text)
+    if not m:
+        return text, []
+    paths = [
+        p.strip() for p in m.group(1).strip().splitlines()
+        if p.strip().startswith("/srv/")
+    ]
+    display = _DELETION_RE.sub("", text).strip()
+    return display, paths
+
+
+def _execute_deletions(chat_id: int, paths: list[str]) -> None:
+    from homelab_agent.tools._clients import run_on_dibo
+
+    bad = [p for p in paths if not p.startswith("/srv/")]
+    if bad:
+        _send(chat_id, "Refused — paths outside /srv/ are not allowed:\n" + "\n".join(bad))
+        return
+    try:
+        quoted = " ".join(shlex.quote(p) for p in paths)
+        total = run_on_dibo(
+            f"du -shc {quoted} 2>/dev/null | tail -1 | awk '{{print $1}}'",
+            timeout=20,
+        ) or "unknown"
+        run_on_dibo(f"rm -f {quoted}", timeout=60)
+        _send(chat_id, f"Deleted {len(paths)} file(s) (~{total} freed).")
+        print(f"[BOT] Deleted {len(paths)} files, ~{total} freed.")
+    except Exception as e:
+        _send(chat_id, f"Deletion failed: {e}")
+        print(f"[BOT] Deletion error: {e}", file=sys.stderr)
+
+
+def _handle_pending_approval(chat_id: int, text: str) -> bool:
+    """If approval is pending for this chat, handle it. Returns True if handled."""
+    if chat_id not in _pending_deletions:
+        return False
+    paths = _pending_deletions.pop(chat_id)
+    if text.lower().strip() in ("yes", "y", "approve", "confirm", "delete"):
+        _send(chat_id, f"Deleting {len(paths)} file(s)...")
+        _execute_deletions(chat_id, paths)
+    else:
+        _send(chat_id, "Deletion cancelled. Nothing was removed.")
+    return True
+
+
+# ── Agent ─────────────────────────────────────────────────────────────────────
+
+def _run_agent(chat_id: int, question: str) -> str:
     from homelab_agent.agent import build_agent
     from homelab_agent.cost_tracking import UsageTracker
+
+    history = _chat_histories.get(chat_id, [])
+    messages = history + [("user", question)]
 
     agent = build_agent()
     tracker = UsageTracker(question)
     try:
         result = agent.invoke(
-            {"messages": [("user", question)]},
+            {"messages": messages},
             config={
                 "configurable": {"thread_id": str(uuid4())},
                 "callbacks": [tracker],
@@ -95,7 +174,11 @@ def _run_agent(question: str) -> str:
                 )
             if content and content.strip():
                 tracker.persist()
-                return content.strip()
+                answer = content.strip()
+                # Update history, keeping last MAX_HISTORY messages
+                updated = history + [("user", question), ("assistant", answer)]
+                _chat_histories[chat_id] = updated[-MAX_HISTORY:]
+                return answer
     except Exception as e:
         tracker.persist()
         return f"[Agent error: {type(e).__name__}: {e}]"
@@ -103,6 +186,8 @@ def _run_agent(question: str) -> str:
     tracker.persist()
     return "(no answer returned)"
 
+
+# ── Main loop ─────────────────────────────────────────────────────────────────
 
 def run_bot() -> None:
     if not settings.telegram_bot_token or not settings.telegram_chat_id:
@@ -130,11 +215,23 @@ def run_bot() -> None:
                 continue
 
             print(f"[BOT] Q: {text!r}")
-            _typing(chat_id)
 
-            answer = _run_agent(text)
-            print(f"[BOT] A: {len(answer)} chars")
-            _send(chat_id, answer)
+            # Check for pending deletion approval before running the agent
+            if _handle_pending_approval(chat_id, text):
+                continue
+
+            _typing(chat_id)
+            answer = _run_agent(chat_id, text)
+
+            # Extract any deletion proposal from the response
+            display, paths = _extract_deletion_proposal(answer)
+            if paths:
+                _pending_deletions[chat_id] = paths
+                display += f"\n\nReply 'yes' to delete these {len(paths)} file(s), or 'no' to cancel."
+                print(f"[BOT] Deletion proposal: {len(paths)} files")
+
+            print(f"[BOT] A: {len(display)} chars")
+            _send(chat_id, display)
 
 
 def main() -> None:
